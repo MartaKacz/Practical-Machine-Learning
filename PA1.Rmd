@@ -1,0 +1,350 @@
+---
+title: "Human Activity Recognition"
+author: "Marta Kaczmarz"
+date: "Sunday, January 25, 2015"
+output: html_document
+---
+
+## Introduction
+
+This is the project for Practical Machine Learninig class. My goal is to predict the manner in which people did the exercise. To achieve this goal I use the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways which are "classe" variable in the training set.
+
+My report decribes few steps like model building, using cross validiation and predicting  which were neccessery to recive the answers for basic questions:
+
+*What is the expected value of out of sample error?
+
+*What is the predicted value of feature "class" for 20 different test case?
+
+
+
+## Desription of the data
+The dataset contains 19622 observations and 160 variables. The target feature is called "classe" and includes 5 classes (sitting-down, standing-up, standing, walking, and sitting) collected on 8 hours of activities of 4 healthy subjects.
+
+Read more: [001]
+
+
+### Cleaning the dataset
+To load the data form csv file I used read.csv function.
+```{r}
+train.set <-read.csv("pml-training.csv")
+test.set <- read.csv("pml-testing.csv")
+```
+
+
+There is a lot of NA in this dataset. Only `r sum(complete.cases(train.set))` from 19622 observations are completed. It means that I can't use some of classifiaction method on the hole data, i.e. Random Forest and SVN.
+
+Otherwise I can delete the variables with zero variance (i.e. all the observations are the same) and the variables with variance near to zero. Obviously these variables are of no use in classification model. I also drop the first 7 column because there are unnecessery in the prediction.
+
+```{r}
+library(caret)
+library(rpart)
+near.zero.var.feat <- nearZeroVar(train.set)
+train.set <- train.set[,-near.zero.var.feat]
+test.set <- test.set[,-near.zero.var.feat]
+
+# function to count the number of non-NAs in each col.
+no.NAs <- function(x) 
+{
+    as.vector(apply(x, 2, function(x) length(which(!is.na(x)))))
+}
+
+# Build vector of columns to delete.
+colcnts <- no.NAs(train.set)
+del <- c()
+for (i in 1:length(colcnts)) {
+    if (colcnts[i] < nrow(train.set)) {
+        del <- c(del, i)
+    }
+}
+
+train.set <- train.set[,-del]
+test.set <- test.set[,-del] 
+```
+
+
+## Data analysis
+When the date are ready I can start to build a classification model. The question is which model I schould choose? There is a lot of classification models and decision is never easy. My first idea was to use Random Forest but as I mentioned in the previous section Random Forest and SVM methods aren't good for this data set. Finaly I decide to predict with trees using rpart function from rpart library.
+
+I wrote some functions wich help me in this classifiaction problem.
+```{r}
+source("appendix.R")
+
+## function spliting the data (feat) into k folds 
+#fun.k.fold.CV (data.to.split = feat, k = 10)
+
+## function witch build tree model with rpart
+#fun.model.rpart(feat.formula, learning.set) 
+
+## function returning real and predicting class labels
+#fun.pred.rpart(model.rpart, data.subset) 
+
+## function witch make a list of real and predicted labels from 10 fold croos validation repeted N = 100 times
+#fun.pred.labels(data.set = feat, N = 100, seed = 123, k.fold)
+
+## function checking on which observation real and predicted labels are diffrent
+#fun.pred.labels.diff(pred.labels)
+
+## funkction calculating mean out of bag error
+#fun.pred.errors(pred.labels)
+
+
+```
+
+
+The full body of the functions you can find in the Appendix.
+
+To calculate out of bag error first I split the training data set into 10 folds. Then I buld 10 models each time using 9 folds to train the model and one with leave (eatch time diffrent) to test the model. I know that each of observations was at least once in the train and in the test subset. To reduce the varriance of the error I repeat CV 100 (Monte Carlo method) times. 
+
+```{r}
+## time of calculation 1 hour
+#result <- fun.pred.labels(data.set = train.set, N = 100, seed = 123, k.fold = 10)
+```
+
+Now I know the value of out of bag error which is 26%.
+
+```{r}
+#pred.errors<-fun.pred.errors(result)
+```
+To check which variables were the most important in each model I used variable.importance option for rpart models
+model.rpart$variable.importance
+
+The features which appear in each model (10CV * 100 MC = 1000 times ) where as follow:
+
+* accel_belt_x 
+* accel_belt_y 
+* accel_belt_z
+* accel_dumbbell_x 
+* accel_dumbbell_y 
+* accel_forearm_x
+* accel_forearm_y
+* magnet_arm_y 
+* magnet_belt_x
+* magnet_belt_y        
+* magnet_belt_z    
+* magnet_dumbbell_y
+* magnet_dumbbell_z
+* pitch_arm
+* pitch_belt        
+* pitch_forearm         
+* roll_belt 
+* roll_dumbbell  
+* roll_foream
+* total_accel_dumbbell
+* yaw_arm 
+* yaw_belt
+* yaw_dumbbell 
+
+## Summarise
+
+I used my model to predict class for new 20 observation. For 13/20 I had a good answer that means that in 35% of observation my answer was wrong. 
+```{r}
+model.rpart<- fun.model.rpart(classe ~.,train.set)
+res<-fun.pred.rpart(model.rpart,test.set)
+res$pred.labels
+```
+So I had to try other models. My second choose was Random Forest and with this model I have 19/20 correct answer.
+
+## Appendix
+
+```{r}
+
+## k-fold cross-validation 
+fun.k.fold.CV <- function(data.to.split = feat, k = 10)
+{
+  test.set <-list()
+  learning.set <-list()
+  splits <- runif(nrow(data.to.split))
+  for(i in 1:k) 
+  {
+    test.idx <- (splits >= (i - 1) / k) & (splits < i / k)
+    learning.idx <- !test.idx
+    
+    test.set[[i]] <- data.to.split[test.idx, , drop=FALSE]
+    learning.set[[i]] <- data.to.split[learning.idx, , drop=FALSE]
+  }
+  
+  return(list(learning.set = learning.set, test.set = test.set))
+}
+
+# funkcja do budowy modelu drzew
+fun.model.rpart <- function(feat.formula, learning.set) 
+{  
+  rpart(feat.formula, data = learning.set)
+}
+
+# funkcja zwracajaca etykiety klas prognozowanych i rzeczywistych
+fun.pred.rpart<- function(model.rpart, data.subset) 
+{  
+  pred.labels <- predict(model.rpart, data.subset, type = "class")
+  real.labels <- data.subset$class
+  
+  return(list(pred.labels = pred.labels, real.labels = real.labels))
+}
+
+fun.pred.labels <- function(data.set = feat, N = 100, seed = 123, k.fold)
+{
+  ## tworzymy puste listy
+  # na etykietki rzeczywiste
+  real.labels.test.set <- list()
+  real.labels.learning.set <- list()
+  
+  # na etykietki prognozowane
+  rpart.pred.labels.test.set<- list()
+  rpart.pred.labels.learning.set<- list()
+  
+  
+  best.feat.list <-list()
+  # ustawiamy ziarno generatora
+  set.seed(seed)
+  
+  for (i in 1:N)
+  {
+    set.seed(seed+i)
+    real.labels.test.set.CV <- list()
+    real.labels.learning.set.CV <- list()
+    
+    # na etykietki prognozowane - CV
+    rpart.pred.labels.test.set.CV<- list()
+    rpart.pred.labels.learning.set.CV<- list()
+    best.feat.list.CV <- list()
+    
+    
+    
+    # podzial na zbior uczacy i testowy
+    
+    split.of.data<-fun.k.fold.CV(data.to.split = data.set, k = k.fold)
+    
+    
+    for (l in 1:k.fold)
+    {
+      # wywolanie metody rankingowej wyboru cech
+      model.feat <- as.formula("classe ~ .")
+      
+      
+      # wywolanie klasyfikatora na zbiorze uczacym
+      model.rpart <- try(fun.model.rpart(feat.formula = model.feat, learning.set = split.of.data$learning.set[[l]]), silent = TRUE)
+      
+      real.labels.test.set.CV[[l]]<-split.of.data$test.set[[l]]$classe
+      real.labels.learning.set.CV[[l]] <- split.of.data$learning.set[[l]]$classe
+      
+      # predykcja
+      
+      if(class(model.rpart)[1] == "try-error")
+      {
+        rpart.pred.labels.test.set.CV[[l]] <- rep(NA,length(split.of.data$test.set[[l]][,1]))
+        rpart.pred.labels.learning.set.CV[[l]] <- rep(NA,length(split.of.data$learning.set[[l]][,1]))
+      }else
+      {
+        rpart.pred.labels.test.set.CV[[l]] = try(fun.pred.rpart(model.rpart, split.of.data$test.set[[l]])$pred.labels, silent = TRUE)
+        rpart.pred.labels.learning.set.CV[[l]] = try(fun.pred.rpart(model.rpart, split.of.data$learning.set[[l]])$pred.labels, silent = TRUE)
+      }
+      best.feat.list.CV[[l]] = model.rpart$variable.importance
+      
+    }
+    # zapamietanie etykietek rzeczywistych na odpowiednich podzbiorach
+    real.labels.test.set[[i]] =  real.labels.test.set.CV
+    real.labels.learning.set[[i]] = real.labels.learning.set.CV
+    rpart.pred.labels.test.set[[i]] = rpart.pred.labels.test.set.CV
+    best.feat.list[[i]] = best.feat.list.CV
+    
+    rpart.pred.labels.learning.set[[i]] = rpart.pred.labels.learning.set.CV
+    
+    
+  }
+  return(list(real.labels = list(test.set = real.labels.test.set,
+                                 learning.set = real.labels.learning.set)
+              ,rpart = list(pred.labels.test.set = rpart.pred.labels.test.set,
+                            pred.labels.learning.set = rpart.pred.labels.learning.set,
+                            best.feat = best.feat.list,
+                            name = "rpart")
+  )      
+  )
+  
+}
+
+
+
+fun.pred.labels.diff <- function(pred.labels)
+{
+  # puste listy
+  error.test.set <-list()
+  error.learning.set <-list()
+  error.test.set.CV <-list()
+  error.learning.set.CV <-list()
+  error <-list()
+  # rozpatrywane sa 3 metody klasyfikacji, dla "lda" l=2, dla "qda" l = 3, dla "rpart" l = 4
+  k <- "rpart"
+  l<-2
+  for (i in 1:length(pred.labels$real.labels$test.set))
+  {
+    # sprawdzenie czy obserwacja ze zbioru testowego zostala poprawnie zaklasyfikowana
+    for(l in 1:length(pred.labels$real.labels$test.set[[1]]))
+    {
+      error.test.set.CV[[l]] <-(pred.labels[[k]]$pred.labels.test.set[[i]][[l]] != pred.labels$real.labels$test.set[[i]][[l]])
+    }
+    # sprawdzenie czy obserwacja ze zbioru uczacego zostala poprawnie zaklasyfikowana
+    for (l in 1:length(pred.labels$real.labels$learning.set[[1]]))
+    {
+      error.learning.set.CV[[l]] <-(pred.labels[[k]]$pred.labels.learning.set[[i]][[l]] != pred.labels$real.labels$learning.set[[i]][[l]])
+    }
+    
+    error.test.set[[i]] <- error.test.set.CV
+    
+    error.learning.set[[i]] <-  error.learning.set.CV
+    
+    error[[k]] <-list(error.test.set=error.test.set
+                      ,error.learning.set = error.learning.set)
+  }
+  
+  return(error)
+  
+}
+
+# funkcja wyznaczająca średni błąd predykcji
+fun.pred.errors <- function(pred.labels)
+{
+  error <-list()
+  test.set.error.CV <- list()
+  learning.set.error.CV <- list()
+  
+  # wyznaczenie roznic w etykietach prognozowanych i rzeczywistych
+  pred.diff <- fun.pred.labels.diff(pred.labels)
+  
+  k <- "rpart"
+  
+  for (i in 1:length(pred.labels$real.labels$test.set))
+  {
+    test.set.error.CV[[i]] <- mean(sapply(pred.diff[[k]]$error.test.set[[i]],mean))
+  }
+  for (i in 1:length(pred.labels$real.labels$learning.set))
+  {
+    learning.set.error.CV[[i]] <- mean(sapply(pred.diff[[k]]$error.learning.set[[i]],mean))
+  }
+  
+  # wyznaczenie bledu predykcji na zbiorze testowym, dla kazdego podzialu na zbior uczacy i testowy
+  
+  test.set.error <- sapply(test.set.error.CV, mean)
+  
+  # wyznaczenie bledu predykcji na zbiorze uczacym, dla kazdego podzialu na zbior uczacy i testowy
+  learning.set.error<-sapply(learning.set.error.CV, mean)
+  
+  # lista zawierajaca sredni blad predykcji oraz jego odchylenie standardowe dla wybranej metody klasyfikacji, oraz podzbioru uczacego lub testowego
+  error[[k]] <-list(test.set=list(mean= mean(na.omit(test.set.error))
+                                  ,sd = sd(na.omit(test.set.error))),
+                    learning.set=list(mean= mean(na.omit(learning.set.error))
+                                      ,sd = sd(na.omit(learning.set.error))))
+  
+  return(error)
+  
+}
+
+
+
+```
+
+
+[001] http://groupware.les.inf.puc-rio.br/har#dataset#ixzz3PqeTiV00
+
+
+
+
